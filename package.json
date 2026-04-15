@@ -1,0 +1,12 @@
+{
+  "name": "elevenlabs-voice-proxy",
+  "version": "2.0.0",
+  "description": "ElevenLabs TTS proxy chạy trên Netlify Functions",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step'"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,16 @@
+[build]
+  publish   = "public"
+  functions = "netlify/functions"
+
+# Proxy ElevenLabs TTS qua Netlify Function
+[[redirects]]
+  from   = "/v1/text-to-speech/*"
+  to     = "/.netlify/functions/tts/:splat"
+  status = 200
+  force  = true
+
+# SPA fallback
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
