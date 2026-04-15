@@ -1,12 +1,228 @@
 <!doctype html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Voice Proxy</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ElevenLabs Voice Generator</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--muted);
+  }
+  input, select, textarea {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    margin-bottom: 14px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 140px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+  .row > div { margin: 0; }
+  .row input, .row select { margin-bottom: 0; }
+
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .status { color: var(--muted); font-size: 13px; }
+  .status.err { color: var(--danger); }
+  audio { width: 100%; margin-top: 14px; }
+  .hint { font-size: 12px; color: var(--muted); margin: -8px 0 14px; }
+  a.dl {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  a.dl:hover { text-decoration: underline; }
+</style>
 </head>
 <body>
-  <h1>ElevenLabs Voice Proxy</h1>
-  <p>Endpoint: <code>POST /v1/text-to-speech/&lt;voiceId&gt;</code></p>
+<div class="wrap">
+  <h1>🎙 ElevenLabs Voice Generator</h1>
+  <p class="sub">TTS proxy chạy trên Netlify Functions</p>
+
+  <div class="card">
+    <label>API Key (xi-api-key)</label>
+    <input id="apiKey" type="password" placeholder="sk_..." autocomplete="off" />
+    <p class="hint">Key được lưu trong trình duyệt của bạn, không gửi đi đâu khác ngoài ElevenLabs.</p>
+
+    <div class="row">
+      <div>
+        <label>Voice ID</label>
+        <input id="voiceId" type="text" placeholder="21m00Tcm4TlvDq8ikWAM" />
+      </div>
+      <div>
+        <label>Model</label>
+        <select id="modelId">
+          <option value="eleven_multilingual_v2">eleven_multilingual_v2</option>
+          <option value="eleven_turbo_v2_5">eleven_turbo_v2_5</option>
+          <option value="eleven_turbo_v2">eleven_turbo_v2</option>
+          <option value="eleven_monolingual_v1">eleven_monolingual_v1</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:14px;">
+      <div>
+        <label>Stability (0–1)</label>
+        <input id="stability" type="number" min="0" max="1" step="0.05" value="0.5" />
+      </div>
+      <div>
+        <label>Similarity (0–1)</label>
+        <input id="similarity" type="number" min="0" max="1" step="0.05" value="0.75" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Văn bản cần đọc</label>
+    <textarea id="text" placeholder="Nhập văn bản tại đây..."></textarea>
+
+    <div class="actions">
+      <button id="genBtn">Tạo giọng nói</button>
+      <span id="status" class="status"></span>
+      <a id="dl" class="dl" style="display:none;" download="voice.mp3">⬇ Tải MP3</a>
+    </div>
+
+    <audio id="player" controls style="display:none;"></audio>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    apiKey: $("apiKey"),
+    voiceId: $("voiceId"),
+    modelId: $("modelId"),
+    stability: $("stability"),
+    similarity: $("similarity"),
+    text: $("text"),
+    btn: $("genBtn"),
+    status: $("status"),
+    player: $("player"),
+    dl: $("dl"),
+  };
+
+  // Khôi phục cài đặt từ localStorage
+  const STORE_KEYS = ["apiKey", "voiceId", "modelId", "stability", "similarity"];
+  STORE_KEYS.forEach((k) => {
+    const v = localStorage.getItem("tts_" + k);
+    if (v != null) els[k].value = v;
+  });
+  STORE_KEYS.forEach((k) => {
+    els[k].addEventListener("change", () => localStorage.setItem("tts_" + k, els[k].value));
+  });
+
+  let lastUrl = null;
+
+  els.btn.addEventListener("click", async () => {
+    const apiKey = els.apiKey.value.trim();
+    const voiceId = els.voiceId.value.trim();
+    const text = els.text.value.trim();
+
+    if (!apiKey) return setStatus("Thiếu API key", true);
+    if (!voiceId) return setStatus("Thiếu Voice ID", true);
+    if (!text) return setStatus("Thiếu văn bản", true);
+
+    els.btn.disabled = true;
+    setStatus("Đang tạo giọng nói...");
+    els.player.style.display = "none";
+    els.dl.style.display = "none";
+    if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
+
+    try {
+      const res = await fetch(`/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "content-type": "application/json",
+          accept: "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: els.modelId.value,
+          voice_settings: {
+            stability: parseFloat(els.stability.value) || 0.5,
+            similarity_boost: parseFloat(els.similarity.value) || 0.75,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`${res.status} — ${errText.slice(0, 200)}`);
+      }
+
+      const blob = await res.blob();
+      lastUrl = URL.createObjectURL(blob);
+      els.player.src = lastUrl;
+      els.player.style.display = "block";
+      els.dl.href = lastUrl;
+      els.dl.style.display = "inline";
+      setStatus("Xong ✓");
+    } catch (err) {
+      setStatus("Lỗi: " + err.message, true);
+    } finally {
+      els.btn.disabled = false;
+    }
+  });
+
+  function setStatus(msg, isErr = false) {
+    els.status.textContent = msg;
+    els.status.className = "status" + (isErr ? " err" : "");
+  }
+</script>
 </body>
 </html>
