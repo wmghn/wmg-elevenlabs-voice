@@ -441,6 +441,28 @@
         else localStorage.removeItem("elevenlabs_studio_project_id");
     });
 
+    // Chờ project parse xong tài liệu (hết trạng thái "creating") trước khi convert.
+    // Tách nhỏ các bước để mỗi request qua proxy đều trả về nhanh — Netlify Function
+    // chỉ được chạy 10 giây, ôm việc nặng trong một call là dính Inactivity Timeout.
+    async function waitForProjectReady(apiKey, projectId) {
+        const maxAttempts = 40; // ~2 phút
+        for (let i = 1; i <= maxAttempts; i++) {
+            const res = await fetch("/v1/studio/projects/" + projectId, {
+                headers: { "xi-api-key": apiKey }
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            const p = data.project || data;
+            if (p.creation_meta && p.creation_meta.status === "failed") {
+                throw new Error("ElevenLabs báo xử lý tài liệu thất bại");
+            }
+            const busy = p.state === "creating" ||
+                (p.creation_meta && (p.creation_meta.status === "pending" || p.creation_meta.status === "creating"));
+            if (!busy) return;
+            await new Promise(r => setTimeout(r, 3000));
+        }
+        throw new Error("Project chưa sẵn sàng sau 2 phút chờ");
+    }
     // Poll đến khi có snapshot mới hơn mốc prevLatest (convert xong), tối đa 10 phút.
     // So theo mốc thay vì can_be_downloaded để không tải nhầm audio cũ khi dùng lại project.
     async function waitForNewSnapshot(apiKey, projectId, prevLatest) {
@@ -490,7 +512,6 @@
                     prevLatestSnapshot = prev.reduce((m, s) => Math.max(m, s.created_at_unix || 0), 0);
                     const form = new FormData();
                     form.append("from_document", new Blob([text], { type: "text/plain" }), "content.txt");
-                    form.append("auto_convert", "true");
                     const updateRes = await fetch("/v1/studio/projects/" + projectId + "/content", {
                         method: "POST",
                         headers: { "xi-api-key": apiKey },
@@ -515,7 +536,6 @@
                 form.append("default_title_voice_id", voiceId);
                 form.append("default_paragraph_voice_id", voiceId);
                 form.append("default_model_id", "eleven_multilingual_v2");
-                form.append("auto_convert", "true");
                 const createRes = await fetch("/v1/studio/projects", {
                     method: "POST",
                     headers: { "xi-api-key": apiKey },
@@ -537,6 +557,16 @@
                 log("📌 Project ID: " + projectId + " — đã lưu để lần sau dùng lại. Mở trình duyệt khác thì dán ID này vào ô Project ID.");
             }
 
+            await waitForProjectReady(apiKey, projectId);
+            const convRes = await fetch("/v1/studio/projects/" + projectId + "/convert", {
+                method: "POST",
+                headers: { "xi-api-key": apiKey }
+            });
+            if (!convRes.ok) {
+                log("❌ Lỗi khi yêu cầu convert: " + await convRes.text());
+                if (convRes.status === 401) showApiKeyFieldOnError();
+                return;
+            }
             log("✅ Đang chờ convert (có thể mất vài phút)...");
             const snapshotId = await waitForNewSnapshot(apiKey, projectId, prevLatestSnapshot);
 

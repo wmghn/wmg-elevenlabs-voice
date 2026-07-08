@@ -8,8 +8,8 @@ Hướng dẫn cho Claude Code khi làm việc với project này.
 
 - `public/index.html` — toàn bộ ứng dụng (HTML + CSS + JS thuần) nằm trong **một file duy nhất**. Dùng Quill editor qua CDN. Người dùng nhập API Key / Voice ID, tạo nhiều block nội dung, bấm Start để tạo và tải file MP3.
 - `netlify/functions/tts.js` — Netlify Function làm **proxy stateless** đến `api.elevenlabs.io`, giải quyết vấn đề CORS. Không giữ secret, không lưu state.
-- `netlify/functions/studio.js` — proxy stateless cho ElevenLabs Studio API (`/v1/studio/*`): tạo project, poll trạng thái convert, lấy snapshot, tải audio.
-- `netlify.toml` — redirect `/v1/text-to-speech/*` và `/v1/studio/*` → function tương ứng (giữ path giống hệt API ElevenLabs), kèm SPA fallback.
+- `netlify/functions/studio.mjs` — proxy stateless cho ElevenLabs Studio API, viết theo **Netlify Functions v2** (default export + Request/Response, path `/v1/studio/*` khai báo bằng `config.path` ngay trong file, response **stream pass-through**).
+- `netlify.toml` — redirect `/v1/text-to-speech/*` → tts function (giữ path giống hệt API ElevenLabs), kèm SPA fallback. Studio không cần redirect.
 
 **Chạy local:** `npm run dev` (netlify dev). Không có build step, không có test suite, không có node_modules.
 
@@ -17,7 +17,8 @@ Hướng dẫn cho Claude Code khi làm việc với project này.
 
 - **API key nằm ở phía client**, lưu trong localStorage, gửi lên qua header `xi-api-key` mỗi request. Proxy chỉ chuyển tiếp — server không bao giờ lưu hay log key. Đây là thiết kế có chủ đích: mỗi người dùng tự dùng key của mình.
 - **Path proxy giữ nguyên format của ElevenLabs** (`/v1/text-to-speech/:voiceId`) để code client trông như gọi thẳng API gốc.
-- **Audio trả về từ function phải là base64 + `isBase64Encoded: true`** — đây là ràng buộc của Netlify Functions với binary response, bỏ đi là hỏng.
+- **Audio trả về từ `tts.js` (Functions v1) phải là base64 + `isBase64Encoded: true`** — ràng buộc của Netlify Functions v1 với binary response, bỏ đi là hỏng. Riêng `studio.mjs` dùng Functions v2 stream pass-through nên không base64.
+- **Netlify Function chỉ được chạy 10 giây** (cả dạng stream) — mọi call qua proxy phải trả về nhanh. Vì vậy luồng Studio **không dùng `auto_convert`** mà tách thành các bước ngắn: tạo/cập nhật content → poll đến khi project hết "creating" → gọi `POST .../convert` riêng (trả về ngay) → poll snapshot. Gộp việc nặng vào một call là dính "Inactivity Timeout" của gateway Netlify. Response stream của v2 có trần 20MB (~20 phút MP3) — audio dài hơn phải tách nội dung.
 - **Các key localStorage đang dùng:** `elevenlabs_api_key`, `elevenlabs_voice_id`, `elevenlabs_voice_contents`, `elevenlabs_studio_content`, `elevenlabs_studio_project_id`, `voice_<field>`. Đổi tên key = mất dữ liệu của người dùng hiện tại. Nếu buộc phải đổi, phải viết migration đọc key cũ.
 - **Debug flag:** `WMG_SHOW_API_KEY = "true"` (localStorage) hiện lại field API Key vốn tự ẩn sau khi đã lưu key. Debug flag mới phải theo prefix `WMG_` và ghi vào bảng Debug flags trong README.md.
 - **Proxy Studio chặn `GET /v1/studio/projects` (liệt kê project)** — quyết định bảo mật có chủ đích: nhiều bên có thể dùng chung API key, không được lộ danh sách Studio của nhau. Tab Studio chỉ tạo project mới rồi thao tác trên đúng project đó qua id. Không bỏ chặn, không thêm tính năng duyệt project có sẵn.
