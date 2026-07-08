@@ -61,6 +61,14 @@
     #startBtn { background-color: #0077cc; margin-left: auto; }
     #startBtn:hover { background-color: #005fa3; }
     #log:empty { display: none; }
+    .tab-bar { display: flex; margin: 20px 0 15px; border-bottom: 2px solid #ddd; }
+    .tab-btn { background: none; color: #666; border: none; padding: 10px 20px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 0; border-radius: 0; border-bottom: 3px solid transparent; }
+    .tab-btn:hover { background: none; color: #0077cc; }
+    .tab-btn.active { color: #0077cc; border-bottom-color: #0077cc; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .studio-note { font-size: 12px; color: #666; margin: 0 0 10px; }
+    #studioStartBtn { margin-left: auto; }
 </style>
 </head>
 <body>
@@ -106,11 +114,30 @@
             </div>
         </div>
     </div>
-    <div class="voice-container" id="voiceContainer"></div>
-    <div class="voice-actions">
-        <button type="button" class="add-block-btn" id="addBlockBtn">+ Thêm nội dung</button>
-        <button type="button" class="clear-all-btn" id="clearAllBtn">Xóa tất cả</button>
-        <button id="startBtn">Start Processing</button>
+    <div class="tab-bar">
+        <button type="button" class="tab-btn active" data-tab="ttsTab">Text to Speech</button>
+        <button type="button" class="tab-btn" data-tab="studioTab">Studio</button>
+    </div>
+    <div class="tab-content active" id="ttsTab">
+        <div class="voice-container" id="voiceContainer"></div>
+        <div class="voice-actions">
+            <button type="button" class="add-block-btn" id="addBlockBtn">+ Thêm nội dung</button>
+            <button type="button" class="clear-all-btn" id="clearAllBtn">Xóa tất cả</button>
+            <button id="startBtn">Start Processing</button>
+        </div>
+    </div>
+    <div class="tab-content" id="studioTab">
+        <div class="voice-block">
+            <p class="studio-note">Studio tạo project mới trên tài khoản ElevenLabs của bạn rồi tải audio về. Tool không truy cập các Studio project có sẵn.</p>
+            <div class="form-row">
+                <label>Tên project:</label>
+                <input type="text" id="studioProjectName" placeholder="Vd: Audiobook chương 1">
+            </div>
+            <div class="voice-editor" id="studioEditor"></div>
+        </div>
+        <div class="voice-actions">
+            <button id="studioStartBtn">Đọc bằng Studio</button>
+        </div>
     </div>
     <div id="log"></div>
 <script>
@@ -209,6 +236,16 @@
             header.addEventListener('click', () => header.parentElement.classList.toggle('open'));
         });
     }
+    function setupTabs() {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.add('active');
+            });
+        });
+    }
     function updateApiStatus() {
         const apiKey = localStorage.getItem("elevenlabs_api_key");
         const voiceId = localStorage.getItem("elevenlabs_voice_id");
@@ -225,6 +262,7 @@
     }
     window.addEventListener("load", function () {
         setupCollapsible();
+        setupTabs();
         const savedApiKey = localStorage.getItem("elevenlabs_api_key");
         if (savedApiKey) document.getElementById("apiKeyInput").value = savedApiKey;
         const savedVoiceId = localStorage.getItem("elevenlabs_voice_id");
@@ -330,6 +368,120 @@
             } catch (err) {
                 log("🚨 Exception khi xử lý " + voice.file_name + ": " + err);
             }
+        }
+    });
+
+    // ==== Studio ====
+    const studioQuill = new Quill('#studioEditor', {
+        theme: 'snow',
+        placeholder: 'Nhập nội dung cho Studio tại đây...',
+        modules: {
+            toolbar: [
+                [{ 'header': [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline'],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                ['clean']
+            ]
+        }
+    });
+    const savedStudioContent = localStorage.getItem("elevenlabs_studio_content");
+    if (savedStudioContent) studioQuill.root.innerHTML = savedStudioContent;
+    studioQuill.on('text-change', () => {
+        localStorage.setItem("elevenlabs_studio_content", studioQuill.root.innerHTML);
+    });
+
+    // Poll đến khi project convert xong (can_be_downloaded = true), tối đa 10 phút
+    async function waitForStudioConvert(apiKey, projectId) {
+        const maxAttempts = 120;
+        for (let i = 1; i <= maxAttempts; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const res = await fetch("/v1/studio/projects/" + projectId, {
+                headers: { "xi-api-key": apiKey }
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const json = await res.json();
+            const project = json.project || json;
+            if (project.can_be_downloaded) return;
+            if (i % 6 === 0) log("⏳ Vẫn đang convert... (" + Math.round(i * 5 / 60) + " phút)");
+        }
+        throw new Error("Hết thời gian chờ convert (10 phút)");
+    }
+
+    document.getElementById("studioStartBtn").addEventListener("click", async function () {
+        const apiKey = localStorage.getItem("elevenlabs_api_key");
+        const voiceId = localStorage.getItem("elevenlabs_voice_id");
+        if (!apiKey) { alert("Vui lòng nhập và lưu API Key trước!"); return; }
+        if (!voiceId) { alert("Vui lòng nhập và lưu Voice ID trước!"); return; }
+        const text = studioQuill.getText().trim();
+        if (!text) { alert("Vui lòng nhập nội dung cho Studio!"); return; }
+        const name = document.getElementById("studioProjectName").value.trim() || "Voice Studio";
+
+        const btn = this;
+        btn.disabled = true;
+        try {
+            log("🔄 Đang tạo Studio project \"" + name + "\"...");
+            const form = new FormData();
+            form.append("name", name);
+            form.append("from_document", new Blob([text], { type: "text/plain" }), "content.txt");
+            form.append("default_title_voice_id", voiceId);
+            form.append("default_paragraph_voice_id", voiceId);
+            form.append("default_model_id", "eleven_multilingual_v2");
+            form.append("auto_convert", "true");
+            const createRes = await fetch("/v1/studio/projects", {
+                method: "POST",
+                headers: { "xi-api-key": apiKey },
+                body: form
+            });
+            if (!createRes.ok) {
+                log("❌ Lỗi tạo Studio project: " + await createRes.text());
+                return;
+            }
+            const created = await createRes.json();
+            const projectId = (created.project || created).project_id;
+            log("✅ Đã tạo project, đang chờ convert (có thể mất vài phút)...");
+
+            await waitForStudioConvert(apiKey, projectId);
+
+            const snapRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots", {
+                headers: { "xi-api-key": apiKey }
+            });
+            if (!snapRes.ok) {
+                log("❌ Lỗi lấy snapshot: " + await snapRes.text());
+                return;
+            }
+            const snapshots = (await snapRes.json()).snapshots || [];
+            if (snapshots.length === 0) {
+                log("❌ Convert xong nhưng không tìm thấy snapshot nào.");
+                return;
+            }
+            snapshots.sort((a, b) => (b.created_at_unix || 0) - (a.created_at_unix || 0));
+            const snapshotId = snapshots[0].project_snapshot_id;
+
+            log("🔄 Đang tải audio từ Studio...");
+            const audioRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots/" + snapshotId + "/stream", {
+                method: "POST",
+                headers: {
+                    "xi-api-key": apiKey,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ convert_to_mpeg: true })
+            });
+            if (!audioRes.ok) {
+                log("❌ Lỗi tải audio: " + await audioRes.text());
+                return;
+            }
+            const blob = await audioRes.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name.replace(/[\\/:*?"<>|]/g, "").trim() + ".mp3";
+            a.click();
+            URL.revokeObjectURL(url);
+            log("✅ Đã xử lý xong Studio: " + name);
+        } catch (err) {
+            log("🚨 Exception khi xử lý Studio: " + (err.message || err));
+        } finally {
+            btn.disabled = false;
         }
     });
 </script>

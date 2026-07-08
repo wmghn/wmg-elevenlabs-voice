@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Netlify (thư mục local của netlify dev)
+.netlify/
+
+# Node
+node_modules/
+
+# Env
+.env
+.env.*

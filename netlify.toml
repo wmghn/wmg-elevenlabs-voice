@@ -9,6 +9,13 @@
   status = 200
   force  = true
 
+# Proxy ElevenLabs Studio qua Netlify Function
+[[redirects]]
+  from   = "/v1/studio/*"
+  to     = "/.netlify/functions/studio/:splat"
+  status = 200
+  force  = true
+
 # SPA fallback
 [[redirects]]
   from   = "/*"
