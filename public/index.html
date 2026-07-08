@@ -82,7 +82,7 @@
             <span class="collapsible-arrow">▼</span>
         </div>
         <div class="collapsible-content">
-            <div class="form-row">
+            <div class="form-row" id="apiKeyRow">
                 <label>API Key:</label>
                 <input type="text" id="apiKeyInput" placeholder="Nhập ElevenLabs API Key">
                 <button type="button" class="save-btn" id="saveApiKeyBtn">Lưu</button>
@@ -116,7 +116,7 @@
     </div>
     <div class="tab-bar">
         <button type="button" class="tab-btn active" data-tab="ttsTab">Text to Speech</button>
-        <button type="button" class="tab-btn" data-tab="studioTab">Studio</button>
+        <button type="button" class="tab-btn" data-tab="studioTab" style="display: none;">Studio</button>
     </div>
     <div class="tab-content active" id="ttsTab">
         <div class="voice-container" id="voiceContainer"></div>
@@ -128,10 +128,14 @@
     </div>
     <div class="tab-content" id="studioTab">
         <div class="voice-block">
-            <p class="studio-note">Studio tạo project mới trên tài khoản ElevenLabs của bạn rồi tải audio về. Tool không truy cập các Studio project có sẵn.</p>
+            <p class="studio-note">Studio tạo project mới trên tài khoản ElevenLabs của bạn rồi tải audio về. Tool không truy cập các Studio project có sẵn. Tên project tự động có prefix "Outsource".</p>
             <div class="form-row">
                 <label>Tên project:</label>
                 <input type="text" id="studioProjectName" placeholder="Vd: Audiobook chương 1">
+            </div>
+            <div class="form-row">
+                <label>Project ID:</label>
+                <input type="text" id="studioProjectId" placeholder="Tự tạo lần đầu — dán ID có sẵn để dùng lại">
             </div>
             <div class="voice-editor" id="studioEditor"></div>
         </div>
@@ -246,6 +250,36 @@
             });
         });
     }
+    // Ẩn field API Key khi đã có key; đặt localStorage WMG_SHOW_API_KEY = "true" để hiện lại (debug)
+    function updateApiKeyVisibility() {
+        const hasKey = !!localStorage.getItem("elevenlabs_api_key");
+        const showDebug = localStorage.getItem("WMG_SHOW_API_KEY") === "true";
+        document.getElementById("apiKeyRow").style.display = (hasKey && !showDebug) ? "none" : "";
+    }
+    // Key sai / thiếu quyền → hiện lại field API Key để người dùng sửa
+    function showApiKeyFieldOnError() {
+        document.getElementById("apiKeyRow").style.display = "";
+        document.getElementById("apiSection").classList.add("open");
+    }
+    // Tab Studio chỉ hiện khi API key có quyền Studio.
+    // Probe bằng id giả: 401 = thiếu quyền / key sai, mã khác (400/404) = có quyền
+    async function updateStudioTabVisibility() {
+        const apiKey = localStorage.getItem("elevenlabs_api_key");
+        const tabBtn = document.querySelector('.tab-btn[data-tab="studioTab"]');
+        let show = false;
+        if (apiKey) {
+            try {
+                const res = await fetch("/v1/studio/projects/wmg-permission-probe", {
+                    headers: { "xi-api-key": apiKey }
+                });
+                show = res.status !== 401 && res.status !== 403;
+            } catch (e) { show = false; }
+        }
+        tabBtn.style.display = show ? "" : "none";
+        if (!show && document.getElementById("studioTab").classList.contains("active")) {
+            document.querySelector('.tab-btn[data-tab="ttsTab"]').click();
+        }
+    }
     function updateApiStatus() {
         const apiKey = localStorage.getItem("elevenlabs_api_key");
         const voiceId = localStorage.getItem("elevenlabs_voice_id");
@@ -268,6 +302,8 @@
         const savedVoiceId = localStorage.getItem("elevenlabs_voice_id");
         if (savedVoiceId) document.getElementById("voiceIdInput").value = savedVoiceId;
         updateApiStatus();
+        updateApiKeyVisibility();
+        updateStudioTabVisibility();
         if (!savedApiKey || !savedVoiceId) {
             document.getElementById("apiSection").classList.add("open");
         }
@@ -278,8 +314,13 @@
                 localStorage.setItem("elevenlabs_api_key", apiKey);
                 const savedMsg = document.getElementById("apiKeySaved");
                 savedMsg.style.display = "inline";
-                setTimeout(() => { savedMsg.style.display = "none"; }, 2000);
+                // Cho người dùng thấy ✓ rồi mới ẩn field
+                setTimeout(() => {
+                    savedMsg.style.display = "none";
+                    updateApiKeyVisibility();
+                }, 2000);
                 updateApiStatus();
+                updateStudioTabVisibility();
             } else { alert("Vui lòng nhập API Key!"); }
         });
         document.getElementById("saveVoiceIdBtn").addEventListener("click", function() {
@@ -364,6 +405,7 @@
                 } else {
                     const errText = await response.text();
                     log("❌ Lỗi khi xử lý " + voice.file_name + ": " + errText);
+                    if (response.status === 401) showApiKeyFieldOnError();
                 }
             } catch (err) {
                 log("🚨 Exception khi xử lý " + voice.file_name + ": " + err);
@@ -389,19 +431,32 @@
     studioQuill.on('text-change', () => {
         localStorage.setItem("elevenlabs_studio_content", studioQuill.root.innerHTML);
     });
+    // Project ID: tự lưu khi tạo project, cho phép dán ID có sẵn từ trình duyệt khác
+    const studioProjectIdInput = document.getElementById("studioProjectId");
+    const savedStudioProjectId = localStorage.getItem("elevenlabs_studio_project_id");
+    if (savedStudioProjectId) studioProjectIdInput.value = savedStudioProjectId;
+    studioProjectIdInput.addEventListener("change", () => {
+        const v = studioProjectIdInput.value.trim();
+        if (v) localStorage.setItem("elevenlabs_studio_project_id", v);
+        else localStorage.removeItem("elevenlabs_studio_project_id");
+    });
 
-    // Poll đến khi project convert xong (can_be_downloaded = true), tối đa 10 phút
-    async function waitForStudioConvert(apiKey, projectId) {
+    // Poll đến khi có snapshot mới hơn mốc prevLatest (convert xong), tối đa 10 phút.
+    // So theo mốc thay vì can_be_downloaded để không tải nhầm audio cũ khi dùng lại project.
+    async function waitForNewSnapshot(apiKey, projectId, prevLatest) {
         const maxAttempts = 120;
         for (let i = 1; i <= maxAttempts; i++) {
             await new Promise(r => setTimeout(r, 5000));
-            const res = await fetch("/v1/studio/projects/" + projectId, {
+            const res = await fetch("/v1/studio/projects/" + projectId + "/snapshots", {
                 headers: { "xi-api-key": apiKey }
             });
             if (!res.ok) throw new Error(await res.text());
-            const json = await res.json();
-            const project = json.project || json;
-            if (project.can_be_downloaded) return;
+            const snapshots = (await res.json()).snapshots || [];
+            const fresh = snapshots.filter(s => (s.created_at_unix || 0) > prevLatest);
+            if (fresh.length > 0) {
+                fresh.sort((a, b) => (b.created_at_unix || 0) - (a.created_at_unix || 0));
+                return fresh[0].project_snapshot_id;
+            }
             if (i % 6 === 0) log("⏳ Vẫn đang convert... (" + Math.round(i * 5 / 60) + " phút)");
         }
         throw new Error("Hết thời gian chờ convert (10 phút)");
@@ -414,48 +469,76 @@
         if (!voiceId) { alert("Vui lòng nhập và lưu Voice ID trước!"); return; }
         const text = studioQuill.getText().trim();
         if (!text) { alert("Vui lòng nhập nội dung cho Studio!"); return; }
-        const name = document.getElementById("studioProjectName").value.trim() || "Voice Studio";
+        let name = document.getElementById("studioProjectName").value.trim() || "Voice Studio";
+        // Tên project luôn có prefix "Outsource" để phân biệt project do tool tạo
+        if (!/^outsource\b/i.test(name)) name = "Outsource " + name;
 
         const btn = this;
         btn.disabled = true;
         try {
-            log("🔄 Đang tạo Studio project \"" + name + "\"...");
-            const form = new FormData();
-            form.append("name", name);
-            form.append("from_document", new Blob([text], { type: "text/plain" }), "content.txt");
-            form.append("default_title_voice_id", voiceId);
-            form.append("default_paragraph_voice_id", voiceId);
-            form.append("default_model_id", "eleven_multilingual_v2");
-            form.append("auto_convert", "true");
-            const createRes = await fetch("/v1/studio/projects", {
-                method: "POST",
-                headers: { "xi-api-key": apiKey },
-                body: form
-            });
-            if (!createRes.ok) {
-                log("❌ Lỗi tạo Studio project: " + await createRes.text());
-                return;
-            }
-            const created = await createRes.json();
-            const projectId = (created.project || created).project_id;
-            log("✅ Đã tạo project, đang chờ convert (có thể mất vài phút)...");
+            let projectId = studioProjectIdInput.value.trim();
+            let prevLatestSnapshot = 0;
 
-            await waitForStudioConvert(apiKey, projectId);
+            if (projectId) {
+                // Dùng lại project đã lưu: ghi mốc snapshot hiện tại rồi cập nhật nội dung + convert
+                log("🔄 Dùng lại project " + projectId + ", đang cập nhật nội dung...");
+                const prevRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots", {
+                    headers: { "xi-api-key": apiKey }
+                });
+                if (prevRes.ok) {
+                    const prev = (await prevRes.json()).snapshots || [];
+                    prevLatestSnapshot = prev.reduce((m, s) => Math.max(m, s.created_at_unix || 0), 0);
+                    const form = new FormData();
+                    form.append("from_document", new Blob([text], { type: "text/plain" }), "content.txt");
+                    form.append("auto_convert", "true");
+                    const updateRes = await fetch("/v1/studio/projects/" + projectId + "/content", {
+                        method: "POST",
+                        headers: { "xi-api-key": apiKey },
+                        body: form
+                    });
+                    if (!updateRes.ok) {
+                        log("❌ Lỗi cập nhật nội dung project: " + await updateRes.text());
+                        if (updateRes.status === 401) showApiKeyFieldOnError();
+                        return;
+                    }
+                } else {
+                    log("⚠ Project ID đã lưu không dùng được (mã " + prevRes.status + "), sẽ tạo project mới.");
+                    projectId = "";
+                }
+            }
 
-            const snapRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots", {
-                headers: { "xi-api-key": apiKey }
-            });
-            if (!snapRes.ok) {
-                log("❌ Lỗi lấy snapshot: " + await snapRes.text());
-                return;
+            if (!projectId) {
+                log("🔄 Đang tạo Studio project \"" + name + "\"...");
+                const form = new FormData();
+                form.append("name", name);
+                form.append("from_document", new Blob([text], { type: "text/plain" }), "content.txt");
+                form.append("default_title_voice_id", voiceId);
+                form.append("default_paragraph_voice_id", voiceId);
+                form.append("default_model_id", "eleven_multilingual_v2");
+                form.append("auto_convert", "true");
+                const createRes = await fetch("/v1/studio/projects", {
+                    method: "POST",
+                    headers: { "xi-api-key": apiKey },
+                    body: form
+                });
+                if (!createRes.ok) {
+                    const errText = await createRes.text();
+                    log("❌ Lỗi tạo Studio project: " + errText);
+                    if (createRes.status === 401) showApiKeyFieldOnError();
+                    if (errText.includes("missing_permissions")) {
+                        log("💡 API key thiếu quyền Studio. Vào ElevenLabs → API Keys → chỉnh sửa key, bật quyền \"Projects\" (write) rồi thử lại.");
+                    }
+                    return;
+                }
+                const created = await createRes.json();
+                projectId = (created.project || created).project_id;
+                studioProjectIdInput.value = projectId;
+                localStorage.setItem("elevenlabs_studio_project_id", projectId);
+                log("📌 Project ID: " + projectId + " — đã lưu để lần sau dùng lại. Mở trình duyệt khác thì dán ID này vào ô Project ID.");
             }
-            const snapshots = (await snapRes.json()).snapshots || [];
-            if (snapshots.length === 0) {
-                log("❌ Convert xong nhưng không tìm thấy snapshot nào.");
-                return;
-            }
-            snapshots.sort((a, b) => (b.created_at_unix || 0) - (a.created_at_unix || 0));
-            const snapshotId = snapshots[0].project_snapshot_id;
+
+            log("✅ Đang chờ convert (có thể mất vài phút)...");
+            const snapshotId = await waitForNewSnapshot(apiKey, projectId, prevLatestSnapshot);
 
             log("🔄 Đang tải audio từ Studio...");
             const audioRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots/" + snapshotId + "/stream", {

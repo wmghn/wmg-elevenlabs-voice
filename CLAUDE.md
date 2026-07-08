@@ -18,8 +18,13 @@ Hướng dẫn cho Claude Code khi làm việc với project này.
 - **API key nằm ở phía client**, lưu trong localStorage, gửi lên qua header `xi-api-key` mỗi request. Proxy chỉ chuyển tiếp — server không bao giờ lưu hay log key. Đây là thiết kế có chủ đích: mỗi người dùng tự dùng key của mình.
 - **Path proxy giữ nguyên format của ElevenLabs** (`/v1/text-to-speech/:voiceId`) để code client trông như gọi thẳng API gốc.
 - **Audio trả về từ function phải là base64 + `isBase64Encoded: true`** — đây là ràng buộc của Netlify Functions với binary response, bỏ đi là hỏng.
-- **Các key localStorage đang dùng:** `elevenlabs_api_key`, `elevenlabs_voice_id`, `elevenlabs_voice_contents`, `elevenlabs_studio_content`, `voice_<field>`. Đổi tên key = mất dữ liệu của người dùng hiện tại. Nếu buộc phải đổi, phải viết migration đọc key cũ.
+- **Các key localStorage đang dùng:** `elevenlabs_api_key`, `elevenlabs_voice_id`, `elevenlabs_voice_contents`, `elevenlabs_studio_content`, `elevenlabs_studio_project_id`, `voice_<field>`. Đổi tên key = mất dữ liệu của người dùng hiện tại. Nếu buộc phải đổi, phải viết migration đọc key cũ.
+- **Debug flag:** `WMG_SHOW_API_KEY = "true"` (localStorage) hiện lại field API Key vốn tự ẩn sau khi đã lưu key. Debug flag mới phải theo prefix `WMG_` và ghi vào bảng Debug flags trong README.md.
 - **Proxy Studio chặn `GET /v1/studio/projects` (liệt kê project)** — quyết định bảo mật có chủ đích: nhiều bên có thể dùng chung API key, không được lộ danh sách Studio của nhau. Tab Studio chỉ tạo project mới rồi thao tác trên đúng project đó qua id. Không bỏ chặn, không thêm tính năng duyệt project có sẵn.
+- **Tên Studio project luôn có prefix "Outsource"** (tự thêm nếu người dùng chưa gõ) — để phân biệt project do tool tạo với project khác trong cùng tài khoản.
+- **Tab Studio chỉ hiện khi API key có quyền Studio** — kiểm tra bằng probe `GET /v1/studio/projects/wmg-permission-probe` (id giả): 401/403 = thiếu quyền → ẩn tab; mã khác = có quyền. Không dùng endpoint liệt kê để probe (đã bị chặn).
+- **Studio dùng lại project qua Project ID** (lưu `elevenlabs_studio_project_id`, hiện trong ô Project ID để copy sang trình duyệt khác): có ID → cập nhật nội dung qua `POST .../content` + `auto_convert` thay vì tạo mới; ID hỏng → tạo mới và ghi đè ID. Khi chờ convert phải so **mốc `created_at_unix` của snapshot** (chỉ nhận snapshot mới hơn mốc trước khi convert), không dùng `can_be_downloaded` — cờ này vẫn true từ lần convert trước, sẽ tải nhầm audio cũ.
+- **Field API Key tự ẩn khi đã lưu key, tự hiện lại khi request trả 401** (key sai / thiếu quyền) hoặc khi bật debug flag `WMG_SHOW_API_KEY`.
 - **Xử lý các block audio tuần tự** (vòng `for` + `await`), không chạy song song — tránh đụng rate limit của ElevenLabs.
 - **Ngôn ngữ UI và thông báo là tiếng Việt**; tên biến, hàm, comment kỹ thuật là tiếng Anh (comment giải thích có thể tiếng Việt như code hiện tại).
 
