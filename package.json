@@ -1,7 +1,7 @@
 {
-  "name": "elevenlabs-voice-proxy",
+  "name": "elevenlabs-voice-generator",
   "version": "2.0.0",
-  "description": "ElevenLabs TTS proxy chạy trên Netlify Functions",
+  "description": "ElevenLabs Voice Generator — web tool tĩnh trên Netlify, gọi thẳng ElevenLabs API từ trình duyệt",
   "scripts": {
     "dev": "netlify dev",
     "build": "echo 'No build step'"

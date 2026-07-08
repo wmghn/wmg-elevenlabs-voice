@@ -145,6 +145,9 @@
     </div>
     <div id="log"></div>
 <script>
+    // Gọi thẳng ElevenLabs từ trình duyệt (API hỗ trợ CORS) — không qua Netlify Function
+    // vì function bị giới hạn 10 giây, audio dài sẽ dính 504 Gateway Timeout
+    const ELEVENLABS_API = "https://api.elevenlabs.io";
     function log(msg) {
         const div = document.getElementById("log");
         div.innerHTML += "<p>" + msg + "</p>";
@@ -263,13 +266,14 @@
     }
     // Tab Studio chỉ hiện khi API key có quyền Studio.
     // Probe bằng id giả: 401 = thiếu quyền / key sai, mã khác (400/404) = có quyền
+    const STUDIO_ENABLED = false; // Tạm ẩn tab Studio — đổi thành true để bật lại
     async function updateStudioTabVisibility() {
         const apiKey = localStorage.getItem("elevenlabs_api_key");
         const tabBtn = document.querySelector('.tab-btn[data-tab="studioTab"]');
         let show = false;
-        if (apiKey) {
+        if (STUDIO_ENABLED && apiKey) {
             try {
-                const res = await fetch("/v1/studio/projects/wmg-permission-probe", {
+                const res = await fetch(ELEVENLABS_API + "/v1/studio/projects/wmg-permission-probe", {
                     headers: { "xi-api-key": apiKey }
                 });
                 show = res.status !== 401 && res.status !== 403;
@@ -382,8 +386,7 @@
             };
             try {
                 log("🔄 Đang xử lý " + voice.file_name + "...");
-                // ⚡ GỌI QUA PROXY (thay vì gọi thẳng ElevenLabs)
-                const response = await fetch("/v1/text-to-speech/" + voiceId, {
+                const response = await fetch(ELEVENLABS_API + "/v1/text-to-speech/" + voiceId, {
                     method: "POST",
                     headers: {
                         "xi-api-key": apiKey,
@@ -447,7 +450,7 @@
     async function waitForProjectReady(apiKey, projectId) {
         const maxAttempts = 40; // ~2 phút
         for (let i = 1; i <= maxAttempts; i++) {
-            const res = await fetch("/v1/studio/projects/" + projectId, {
+            const res = await fetch(ELEVENLABS_API + "/v1/studio/projects/" + projectId, {
                 headers: { "xi-api-key": apiKey }
             });
             if (!res.ok) throw new Error(await res.text());
@@ -469,7 +472,7 @@
         const maxAttempts = 120;
         for (let i = 1; i <= maxAttempts; i++) {
             await new Promise(r => setTimeout(r, 5000));
-            const res = await fetch("/v1/studio/projects/" + projectId + "/snapshots", {
+            const res = await fetch(ELEVENLABS_API + "/v1/studio/projects/" + projectId + "/snapshots", {
                 headers: { "xi-api-key": apiKey }
             });
             if (!res.ok) throw new Error(await res.text());
@@ -504,7 +507,7 @@
             if (projectId) {
                 // Dùng lại project đã lưu: ghi mốc snapshot hiện tại rồi cập nhật nội dung + convert
                 log("🔄 Dùng lại project " + projectId + ", đang cập nhật nội dung...");
-                const prevRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots", {
+                const prevRes = await fetch(ELEVENLABS_API + "/v1/studio/projects/" + projectId + "/snapshots", {
                     headers: { "xi-api-key": apiKey }
                 });
                 if (prevRes.ok) {
@@ -512,7 +515,7 @@
                     prevLatestSnapshot = prev.reduce((m, s) => Math.max(m, s.created_at_unix || 0), 0);
                     const form = new FormData();
                     form.append("from_document", new Blob([text], { type: "text/plain" }), "content.txt");
-                    const updateRes = await fetch("/v1/studio/projects/" + projectId + "/content", {
+                    const updateRes = await fetch(ELEVENLABS_API + "/v1/studio/projects/" + projectId + "/content", {
                         method: "POST",
                         headers: { "xi-api-key": apiKey },
                         body: form
@@ -536,7 +539,7 @@
                 form.append("default_title_voice_id", voiceId);
                 form.append("default_paragraph_voice_id", voiceId);
                 form.append("default_model_id", "eleven_multilingual_v2");
-                const createRes = await fetch("/v1/studio/projects", {
+                const createRes = await fetch(ELEVENLABS_API + "/v1/studio/projects", {
                     method: "POST",
                     headers: { "xi-api-key": apiKey },
                     body: form
@@ -558,7 +561,7 @@
             }
 
             await waitForProjectReady(apiKey, projectId);
-            const convRes = await fetch("/v1/studio/projects/" + projectId + "/convert", {
+            const convRes = await fetch(ELEVENLABS_API + "/v1/studio/projects/" + projectId + "/convert", {
                 method: "POST",
                 headers: { "xi-api-key": apiKey }
             });
@@ -571,7 +574,7 @@
             const snapshotId = await waitForNewSnapshot(apiKey, projectId, prevLatestSnapshot);
 
             log("🔄 Đang tải audio từ Studio...");
-            const audioRes = await fetch("/v1/studio/projects/" + projectId + "/snapshots/" + snapshotId + "/stream", {
+            const audioRes = await fetch(ELEVENLABS_API + "/v1/studio/projects/" + projectId + "/snapshots/" + snapshotId + "/stream", {
                 method: "POST",
                 headers: {
                     "xi-api-key": apiKey,

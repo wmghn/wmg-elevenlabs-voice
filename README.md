@@ -3,7 +3,7 @@
 Công cụ tạo giọng nói từ văn bản (TTS) qua API ElevenLabs, chạy trên Netlify. Gồm hai chế độ:
 
 - **Text to Speech** — tạo nhiều block nội dung, mỗi block xuất một file MP3.
-- **Studio** — tạo Studio project trên tài khoản ElevenLabs rồi tải audio về. Tool **không** truy cập danh sách Studio project có sẵn (proxy chặn endpoint liệt kê để không lộ Studio của các bên khác dùng chung API key). Tên project luôn được tự động thêm prefix **"Outsource"** (vd: nhập `TEST` → project tên `Outsource TEST`).
+- **Studio** *(đang tạm ẩn — bật lại bằng `STUDIO_ENABLED = true` trong `public/index.html`)* — tạo Studio project trên tài khoản ElevenLabs rồi tải audio về. Tool **không bao giờ gọi endpoint liệt kê Studio project**, nên không lộ Studio của các bên khác dùng chung API key. Tên project luôn được tự động thêm prefix **"Outsource"** (vd: nhập `TEST` → project tên `Outsource TEST`).
 
 > **Lưu ý quyền API key cho Studio:** tab Studio **chỉ hiện ra khi API key có quyền Studio** (mục **Projects** khi chỉnh sửa API key trong ElevenLabs). Key thiếu quyền `projects_write` sẽ gặp lỗi `missing_permissions` khi tạo project.
 
@@ -23,7 +23,7 @@ Không có build step, không có dependency — deploy thẳng lên Netlify là
 
 ## Cấu hình
 
-Nhập **API Key** và **Voice ID** trong mục "API & Voice ID" rồi bấm Lưu. Cả hai được lưu trong localStorage của trình duyệt, gửi kèm mỗi request qua proxy — server không lưu key.
+Nhập **API Key** và **Voice ID** trong mục "API & Voice ID" rồi bấm Lưu. Cả hai được lưu trong localStorage của trình duyệt và gửi **thẳng đến `api.elevenlabs.io`** — không đi qua server trung gian nào.
 
 ### Field API Key tự ẩn
 

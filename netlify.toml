@@ -1,16 +1,8 @@
 [build]
-  publish   = "public"
-  functions = "netlify/functions"
+  publish = "public"
 
-# Proxy ElevenLabs TTS qua Netlify Function
-[[redirects]]
-  from   = "/v1/text-to-speech/*"
-  to     = "/.netlify/functions/tts/:splat"
-  status = 200
-  force  = true
-
-# Proxy ElevenLabs Studio: studio.mjs (Functions v2) tự khai báo path /v1/studio/*
-# qua config.path — không cần redirect ở đây
+# Trình duyệt gọi thẳng api.elevenlabs.io (API hỗ trợ CORS) — không dùng Netlify
+# Function làm proxy: function bị giới hạn 10 giây, audio dài sẽ dính 504.
 
 # SPA fallback
 [[redirects]]
